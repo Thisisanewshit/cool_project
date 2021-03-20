@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${service_name}
+  # name: sample-app
+spec:
+  replicas: ${replicas_num}
+  # replicas: 3
+  selector:
+    matchLabels:
+      app: ${service_name}
+      # app: nginx
+  template:
+    metadata:
+      labels:
+        app: ${service_name}
+        # app: nginx
+    spec:
+      containers:
+        # - name: nginx
+        #   image: 886697164571.dkr.ecr.ap-southeast-1.amazonaws.com/helloworld_image:v3
+        #   ports:
+        #     - name: http
+        #       containerPort: 80
+        - name: ${service_name}
+          image: 886697164571.dkr.ecr.ap-southeast-1.amazonaws.com/${service_name}:${tag}
+          ports:
+            - name: http
+              containerPort: ${deployment_port}
+              # containerPort: 80
+---
+
+
