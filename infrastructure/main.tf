@@ -1,7 +1,7 @@
 terraform {
   required_version = ">= 0.12.0"
     backend "s3"{
-    bucket = "devsecops-state-dsfs" 
+    bucket = ${state_bucket}
     encrypt = true
     key = "ops/terraform.tfstate"
     region = "ap-southeast-1"
