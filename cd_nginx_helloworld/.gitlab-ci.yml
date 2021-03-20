@@ -1,0 +1,83 @@
+image: 886697164571.dkr.ecr.ap-southeast-1.amazonaws.com/base_image:v2
+
+before_script:
+  - echo "Before script section"
+  - aws configure set aws_access_key_id $aws_AK
+  - aws configure set aws_secret_access_key $aws_SK
+  - aws configure set default.region $region
+
+
+
+after_script:
+  - echo "After script section"
+
+
+build1:
+  stage: build
+  script:
+    - echo "Do your build here"
+    - echo "tag = \"${gitlab_tag}\"" >> terraform.tfvars || true
+    - echo "replicas_num = \"${gitlab_replicas_num}\"" >> terraform.tfvars || true
+    - echo "service_name = \"${gitlab_service_name}\"" >> terraform.tfvars || true
+    - cat yaml/deployment.yaml yaml/service.yaml > deployment_service.yaml
+    - echo -e "\n---\n" >> deployment.yaml; cat yaml/service.yaml >> deployment.yaml || true
+    - cat terraform.tfvars || true
+
+    - terraform init
+    - terraform plan
+    - terraform apply -auto-approve
+
+    - terraform output deployment | tee deployment.yaml
+    - cat deployment.yaml
+  artifacts:
+    paths:
+    - deployment.yaml
+  tags:
+    - dev
+
+test1:
+  stage: test
+  script:
+    - echo "Do a test here"
+    - aws ecr describe-image-scan-findings --repository-name $gitlab_service_name --image-id imageTag=$gitlab_tag > scan_result.json
+    - export SCAN_RESULT=$(python3 script.py)
+    - echo $SCAN_RESULT >> testenv
+  tags:
+    - dev
+  artifacts:
+    paths:
+    - testenv
+    - scan_result.json
+
+deploy1:
+  stage: deploy
+  script:
+    - export SCAN_RESULT=$(cat testenv)
+    - echo $SCAN_RESULT
+    - cat testenv
+    - cat deployment.yaml
+    - echo "Do your deploy here"
+    - aws eks update-kubeconfig --region ap-southeast-1 --name test
+    # - kubectl get no
+    # - kubectl apply -f deploy.yaml
+    # - kubectl apply -f service.yaml
+    # - if [ "$SCAN_RESULT" == "Scan_Pass" ]; then kubectl apply -f deploy.yaml ; fi
+    # - if [ "$SCAN_RESULT" == "Scan_Pass" ]; then kubectl apply -f service.yaml ; fi
+    - if [ "$SCAN_RESULT" == "Scan_Pass" ]; then kubectl apply -f deployment.yaml ; else exit 1; fi
+  when: manual
+  needs: ["test1","build1"]
+  # only:
+  #   variables: [ $SCAN_RESULT == "Scan_Pass" ]
+  # rules:
+  #   - if: '$SCAN_RESULT == "Scan_Pass"'
+  #     when: manual
+  #     allow_failure: true
+  #   - if: '$SCAN_RESULT == "Scan_Failed"'
+  #     when: never
+  #     allow_failure: true
+  dependencies:
+    - test1
+    - build1
+  tags:
+    - dev
+
