@@ -1,0 +1,86 @@
+image: 886697164571.dkr.ecr.ap-southeast-1.amazonaws.com/base_image:v4
+# Default output file for Terraform plan
+variables:
+  PLAN: plan.tfplan
+  JSON_PLAN_FILE: tfplan.json
+
+# cache:
+#   paths:
+#     - .terraform
+#     - .terraform.lock.hcl
+
+before_script:
+  - export AWS_ACCESS_KEY_ID=$aws_AK
+  - export AWS_SECRET_ACCESS_KEY=$aws_SK
+  - export AWS_DEFAULT_REGION=$region
+  - terraform --version
+  - terraform init
+
+stages:
+  - validate
+  - build
+  - test
+  - deploy
+  - destroy
+
+validate:
+  stage: validate
+  script:
+    - terraform validate
+  tags:
+    - dev
+
+plan:
+  stage: build
+  script:
+    - echo "repo_name = \"${repo_name}\"" >> terraform.tfvars || true
+    - cat terraform.tfvars || true
+    - terraform plan -out=$PLAN
+    - "terraform show --json $PLAN > $JSON_PLAN_FILE"
+    - cp /opa ./
+    - chmod 755 ./opa
+    - export SCAN_RESULT=$(./opa eval --format pretty --data terraform_module.rego --input $JSON_PLAN_FILE "data.terraform.module.deny")
+    - echo $SCAN_RESULT >> testenv
+    - cat testenv
+  artifacts:
+    paths:
+      - $PLAN
+      - testenv
+    reports:
+      terraform: $JSON_PLAN_FILE
+  when: manual
+  tags:
+    - dev
+
+# Separate apply job for manual launching Terraform as it can be destructive
+# action.
+apply:
+  stage: deploy
+  environment:
+    name: production
+  script:
+    - export SCAN_RESULT=$(cat testenv)
+    - echo $SCAN_RESULT
+    # - terraform apply -input=false $PLAN
+    - if [ "$SCAN_RESULT" == "true" ]; then terraform apply -input=false $PLAN ; else exit 1; fi
+  dependencies:
+    - plan
+  when: manual
+  needs: ["plan"]
+  tags:
+    - dev
+
+destroy:
+  stage: destroy
+  environment:
+    name: production
+  script:
+    - terraform destroy -auto-approve
+  dependencies:
+    - plan
+  when: manual
+  needs: ["plan"]
+  only:
+    - master
+  tags:
+    - dev
